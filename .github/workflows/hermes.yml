@@ -2,8 +2,12 @@ name: Hermes Autonomous Runner
 
 on:
   schedule:
-    # 07:13, 13:13, 21:13 ICT (Asia/Ho_Chi_Minh, UTC+7) - odd minute to avoid :00 GitHub runner congestion
-    - cron: '13 0,6,14 * * *'
+    # 06:15 ICT (23:15 UTC prev day) - Morning Intel Briefing
+    - cron: '15 23 * * *'
+    # 12:30 ICT (05:30 UTC) - Midday System Check
+    - cron: '30 5 * * *'
+    # 20:45 ICT (13:45 UTC) - Evening Intel Digest & Daily Review
+    - cron: '45 13 * * *'
   workflow_dispatch:
     inputs:
       prompt:
