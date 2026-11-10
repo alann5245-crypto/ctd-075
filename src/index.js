@@ -79,14 +79,32 @@ export default {
       request.method === "GET" &&
       (path === "/setup-webhooks" || path === "/delete-webhooks")
     ) {
-      const expectedKey = String(env.WEBHOOK_SECRET || "").trim();
-      const providedKey = String(url.searchParams.get("key") || "").trim();
-      if (!expectedKey || providedKey !== expectedKey) {
+      const expectedKey = String(
+        env.WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || ""
+      ).trim();
+      const rawProvided = String(
+        url.searchParams.get("key") || url.searchParams.get("secret") || ""
+      ).trim();
+      const providedKey = decodeURIComponent(rawProvided);
+
+      if (!expectedKey) {
         return Response.json(
           {
             ok: false,
             error:
-              "Unauthorized. Set WEBHOOK_SECRET in Worker variables and pass ?key=<WEBHOOK_SECRET>.",
+              "Biến WEBHOOK_SECRET chưa được cài trong Worker Settings -> Variables and Secrets. Hãy tạo biến này trên Cloudflare trước.",
+          },
+          { status: 400 }
+        );
+      }
+
+      if (providedKey !== expectedKey && rawProvided !== expectedKey) {
+        return Response.json(
+          {
+            ok: false,
+            error:
+              "Mật khẩu key không khớp với WEBHOOK_SECRET trên Cloudflare Worker. Hãy kiểm tra lại giá trị đã nhập.",
+            hint: `Độ dài key bạn gửi: ${rawProvided.length}, độ dài secret trên Cloudflare: ${expectedKey.length}`,
           },
           { status: 401 }
         );
@@ -95,6 +113,8 @@ export default {
       const results = {};
       const origin = url.origin;
       const isSetup = path === "/setup-webhooks";
+      // Auto-sanitize for Telegram requirement: A-Z, a-z, 0-9, _ and -
+      const tgSecretToken = expectedKey.replace(/[^a-zA-Z0-9_-]/g, "_") || "hermes_secret";
 
       for (const [slotKey, slotMeta] of Object.entries(BOT_SLOTS)) {
         const token = getBotToken(env, slotKey);
@@ -110,7 +130,7 @@ export default {
         const bodyPayload = isSetup
           ? {
               url: `${origin}/webhook/${slotKey}`,
-              secret_token: expectedKey,
+              secret_token: tgSecretToken,
               allowed_updates: ["message", "edited_message"],
               drop_pending_updates: false,
             }
@@ -141,11 +161,15 @@ export default {
 
     // 3. Incoming Telegram Webhook handler: POST /webhook/:slot
     if (request.method === "POST" && path.startsWith("/webhook")) {
-      if (env.WEBHOOK_SECRET) {
+      const expectedSecret = String(
+        env.WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || ""
+      ).trim();
+      if (expectedSecret) {
         const headerSecret = request.headers.get(
           "X-Telegram-Bot-Api-Secret-Token"
-        );
-        if (headerSecret !== String(env.WEBHOOK_SECRET).trim()) {
+        ) || "";
+        const tgSecretToken = expectedSecret.replace(/[^a-zA-Z0-9_-]/g, "_") || "hermes_secret";
+        if (headerSecret !== expectedSecret && headerSecret !== tgSecretToken) {
           return new Response("Unauthorized webhook secret", { status: 401 });
         }
       }
