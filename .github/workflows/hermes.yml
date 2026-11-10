@@ -33,7 +33,7 @@ jobs:
     name: State Synchronization
     if: github.actor == 'alann5245-crypto' || github.actor == 'alanturing201-code'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout Runner Repository
@@ -77,6 +77,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WORKFLOW_INPUT_PROMPT: ${{ inputs.prompt }}
+          PYTHONUNBUFFERED: "1"
         run: |
           echo "Syncing state..."
           uv run --project /tmp/vault /tmp/vault/entrypoint.py > /tmp/vault/logs/latest_session.log 2>&1
