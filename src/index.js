@@ -50,7 +50,7 @@ function isAllowedChat(env, chatId) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, "") || "/";
 
@@ -219,6 +219,18 @@ export default {
         return new Response("GitHub dispatch failed", { status: 502 });
       }
 
+      // Immediate acknowledgement on the Fixed Main Bot so the phone shows status within ~1s
+      if (ctx && typeof ctx.waitUntil === "function") {
+        const sourceNote = slotMeta.label !== "MAIN_BOT" ? ` (qua ${slotMeta.label})` : "";
+        ctx.waitUntil(
+          notifyMainBot(
+            env,
+            msg.chat.id,
+            `⚡ Đã nhận lệnh${sourceNote}. Hermes đang khởi động GitHub Actions (khoảng 15–30 giây) và sẽ phản hồi chi tiết tại đây.`
+          )
+        );
+      }
+
       return Response.json({
         ok: true,
         dispatched_to: targetRepo,
@@ -229,3 +241,23 @@ export default {
     return new Response("Not Found", { status: 404 });
   },
 };
+
+async function notifyMainBot(env, chatId, text) {
+  const mainToken = getBotToken(env, "main");
+  if (!mainToken) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${mainToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+      }),
+    });
+  } catch {
+    // Non-blocking courtesy notification
+  }
+}
+

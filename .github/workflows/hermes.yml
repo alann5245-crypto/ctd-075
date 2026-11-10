@@ -16,9 +16,8 @@ on:
   issue_comment:
     types:
       - created
-  commit_comment:
-    types:
-      - created
+  # NOTE: commit_comment is not a valid workflow trigger in GitHub Actions (only issue_comment is).
+  # Commit comments can still be processed if received via repository_dispatch.
 
 permissions:
   contents: write
