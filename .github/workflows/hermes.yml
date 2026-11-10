@@ -126,10 +126,12 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          ALERT_TOKEN="${TELEGRAM_MAIN_BOT_TOKEN:-$TELEGRAM_BOT_TOKEN}"
-          if [ -n "${ALERT_TOKEN}" ] && [ -n "${TELEGRAM_CHAT_ID}" ]; then
+          RAW_TOKEN="${TELEGRAM_MAIN_BOT_TOKEN:-$TELEGRAM_BOT_TOKEN}"
+          ALERT_TOKEN="$(echo "${RAW_TOKEN}" | tr -d '`"'\'' ')"
+          CLEAN_CHAT_ID="$(echo "${TELEGRAM_CHAT_ID}" | tr -cd '0-9,-')"
+          if [ -n "${ALERT_TOKEN}" ] && [ -n "${CLEAN_CHAT_ID}" ]; then
             curl -sS -X POST "https://api.telegram.org/bot${ALERT_TOKEN}/sendMessage" \
-              -d "chat_id=${TELEGRAM_CHAT_ID}" \
-              --data-urlencode "text=⚠️ [HERMES ALERT] Workflow tại Repo 1 bị lỗi (có thể do hết hạn VAULT_PAT hoặc lỗi hệ thống). Hãy kiểm tra ngay!" \
+              -d "chat_id=${CLEAN_CHAT_ID}" \
+              --data-urlencode "text=⚠️ [HERMES ALERT] Workflow tại Repo 1 gặp sự cố. Hãy kiểm tra logs/latest_session.log trên Repo 2!" \
               >/dev/null 2>&1 || true
           fi
