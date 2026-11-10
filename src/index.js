@@ -108,7 +108,6 @@ export default {
         service: "hermes-telegram-gateway",
         target_repo: env.GITHUB_REPO || "alann5245-crypto/ctd-075",
         configured_bots: configuredSlots.map((k) => BOT_SLOTS[k].label),
-        available_env_keys: Object.keys(env).filter((k) => !k.startsWith("__")),
         worker_variables_status: {
           main_bot_token: configuredSlots.includes("main"),
           webhook_secret: Boolean(webhookSecret),
@@ -134,11 +133,11 @@ export default {
       ).trim();
       const providedKey = decodeURIComponent(rawProvided);
 
-      if (expectedKey && providedKey !== expectedKey && rawProvided !== expectedKey) {
+      if (!expectedKey || (providedKey !== expectedKey && rawProvided !== expectedKey)) {
         return Response.json(
           {
             ok: false,
-            error: "Unauthorized. Vui lòng truyền ?key=<WEBHOOK_SECRET>",
+            error: "Unauthorized. Vui lòng cấu hình WEBHOOK_SECRET và truyền ?key=<WEBHOOK_SECRET>",
           },
           { status: 401 }
         );
@@ -186,11 +185,10 @@ export default {
       return Response.json({
         ok: true,
         target_repo: targetRepo,
-        available_env_keys: Object.keys(env).filter((k) => !k.startsWith("__")),
         variables: {
           has_main_bot_token: Boolean(mainToken),
           has_webhook_secret: Boolean(expectedKey),
-          allowed_chat_id: getRawAllowedChat(env) || "NOT_SET",
+          allowed_chat_configured: Boolean(getRawAllowedChat(env)),
           has_github_pat: Boolean(ghPat),
         },
         telegram_webhook_info: tgWebhookInfo,
