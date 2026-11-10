@@ -5,24 +5,25 @@
  *   - 1 Fixed Main Bot:      MAIN_BOT (/webhook/main)
  *   - One-click Webhook registration: GET /setup-webhooks?key=<WEBHOOK_SECRET>
  *   - One-click Webhook removal:      GET /delete-webhooks?key=<WEBHOOK_SECRET>
+ *   - Diagnostic status:              GET /status?key=<WEBHOOK_SECRET>
  */
 
 const BOT_SLOTS = {
   main: {
     label: "MAIN_BOT",
-    envKeys: ["TELEGRAM_MAIN_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"],
+    envKeys: ["TELEGRAM_MAIN_BOT_TOKEN", "TELEGRAM_BOT_TOKEN", "MAIN_BOT_TOKEN"],
   },
   bot1: {
     label: "BOT_1",
-    envKeys: ["TELEGRAM_BOT_TOKEN_1"],
+    envKeys: ["TELEGRAM_BOT_TOKEN_1", "BOT_1_TOKEN"],
   },
   bot2: {
     label: "BOT_2",
-    envKeys: ["TELEGRAM_BOT_TOKEN_2"],
+    envKeys: ["TELEGRAM_BOT_TOKEN_2", "BOT_2_TOKEN"],
   },
   bot3: {
     label: "BOT_3",
-    envKeys: ["TELEGRAM_BOT_TOKEN_3"],
+    envKeys: ["TELEGRAM_BOT_TOKEN_3", "BOT_3_TOKEN"],
   },
 };
 
@@ -37,8 +38,12 @@ function getBotToken(env, slotKey) {
   return "";
 }
 
+function getRawAllowedChat(env) {
+  return String(env.ALLOWED_CHAT_ID || env.TELEGRAM_CHAT_ID || "").trim();
+}
+
 function isAllowedChat(env, chatId) {
-  const rawAllowed = String(env.ALLOWED_CHAT_ID || env.TELEGRAM_CHAT_ID || "").trim();
+  const rawAllowed = getRawAllowedChat(env);
   if (!rawAllowed) return false;
   const allowedSet = new Set(
     rawAllowed
@@ -54,27 +59,113 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, "") || "/";
 
-    // 1. Health check endpoint
+    // 1. Health check & configuration status endpoint
     if (request.method === "GET" && (path === "/" || path === "/health")) {
       const configuredSlots = Object.keys(BOT_SLOTS).filter((k) =>
         Boolean(getBotToken(env, k))
       );
+      const rawAllowed = getRawAllowedChat(env);
+      const hasGhPat = Boolean(String(env.GITHUB_PAT || "").trim());
+      const hasWebhookSecret = Boolean(
+        String(env.WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || "").trim()
+      );
+
       return Response.json({
         ok: true,
         service: "hermes-telegram-gateway",
         target_repo: env.GITHUB_REPO || "alann5245-crypto/ctd-075",
         configured_bots: configuredSlots.map((k) => BOT_SLOTS[k].label),
+        worker_variables_status: {
+          main_bot_token: configuredSlots.includes("main"),
+          webhook_secret: hasWebhookSecret,
+          allowed_chat_id: rawAllowed ? `CONFIGURED (${rawAllowed.length} chars)` : "NOT_SET",
+          github_pat: hasGhPat ? "CONFIGURED" : "NOT_SET",
+        },
         endpoints: {
           main: "/webhook/main",
           bot1: "/webhook/bot1",
           bot2: "/webhook/bot2",
           bot3: "/webhook/bot3",
           setup: "/setup-webhooks?key=<WEBHOOK_SECRET>",
+          status: "/status?key=<WEBHOOK_SECRET>",
         },
       });
     }
 
-    // 2. One-click setWebhook / deleteWebhook management endpoints
+    // 2. Comprehensive Diagnostic Endpoint: GET /status?key=<WEBHOOK_SECRET>
+    if (request.method === "GET" && path === "/status") {
+      const expectedKey = String(
+        env.WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || ""
+      ).trim();
+      const rawProvided = String(
+        url.searchParams.get("key") || url.searchParams.get("secret") || ""
+      ).trim();
+      const providedKey = decodeURIComponent(rawProvided);
+
+      if (expectedKey && providedKey !== expectedKey && rawProvided !== expectedKey) {
+        return Response.json(
+          {
+            ok: false,
+            error: "Unauthorized. Vui lòng truyền ?key=<WEBHOOK_SECRET>",
+          },
+          { status: 401 }
+        );
+      }
+
+      const mainToken = getBotToken(env, "main");
+      let tgWebhookInfo = null;
+      if (mainToken) {
+        try {
+          const resp = await fetch(
+            `https://api.telegram.org/bot${mainToken}/getWebhookInfo`
+          );
+          tgWebhookInfo = await resp.json();
+        } catch (err) {
+          tgWebhookInfo = { error: String(err) };
+        }
+      }
+
+      const targetRepo = env.GITHUB_REPO || "alann5245-crypto/ctd-075";
+      const ghPat = String(env.GITHUB_PAT || "").trim();
+      let githubPatTest = null;
+      if (ghPat) {
+        try {
+          const resp = await fetch(`https://api.github.com/repos/${targetRepo}`, {
+            headers: {
+              Accept: "application/vnd.github+json",
+              Authorization: `Bearer ${ghPat}`,
+              "User-Agent": "Hermes-Diagnostic-Worker",
+            },
+          });
+          githubPatTest = {
+            ok: resp.ok,
+            status: resp.status,
+            permissions: resp.ok
+              ? (await resp.json()).permissions
+              : await resp.text(),
+          };
+        } catch (err) {
+          githubPatTest = { error: String(err) };
+        }
+      } else {
+        githubPatTest = { ok: false, error: "GITHUB_PAT chưa được đặt trên Cloudflare Worker" };
+      }
+
+      return Response.json({
+        ok: true,
+        target_repo: targetRepo,
+        variables: {
+          has_main_bot_token: Boolean(mainToken),
+          has_webhook_secret: Boolean(expectedKey),
+          allowed_chat_id: getRawAllowedChat(env) || "NOT_SET",
+          has_github_pat: Boolean(ghPat),
+        },
+        telegram_webhook_info: tgWebhookInfo,
+        github_pat_test: githubPatTest,
+      });
+    }
+
+    // 3. One-click setWebhook / deleteWebhook management endpoints
     if (
       request.method === "GET" &&
       (path === "/setup-webhooks" || path === "/delete-webhooks")
@@ -159,7 +250,7 @@ export default {
       });
     }
 
-    // 3. Incoming Telegram Webhook handler: POST /webhook/:slot
+    // 4. Incoming Telegram Webhook handler: POST /webhook/:slot
     if (request.method === "POST" && path.startsWith("/webhook")) {
       const expectedSecret = String(
         env.WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || ""
@@ -200,7 +291,20 @@ export default {
         return new Response("Ignored non-message update", { status: 200 });
       }
 
+      const rawAllowed = getRawAllowedChat(env);
+      // Auto-Help: If ALLOWED_CHAT_ID is not configured yet on Worker, immediately tell the user their Chat ID!
+      if (!rawAllowed) {
+        console.warn(`[HERMES] ALLOWED_CHAT_ID not configured on Worker. Sender chat_id: ${msg.chat.id}`);
+        await notifyMainBot(
+          env,
+          msg.chat.id,
+          `⚠️ *[Hermes Gateway - Cấu hình thiếu]*\n\nCloudflare Worker chưa được cấu hình biến \`ALLOWED_CHAT_ID\`.\n\n👉 **Chat ID của bạn là:** \`${msg.chat.id}\`\n\nHãy vào Cloudflare Dashboard ➔ Workers & Pages ➔ \`ctd-075\` ➔ Settings ➔ Variables and Secrets, thêm biến:\n• Name: \`ALLOWED_CHAT_ID\`\n• Value: \`${msg.chat.id}\``
+        );
+        return new Response("Missing ALLOWED_CHAT_ID in Worker env", { status: 200 });
+      }
+
       if (!isAllowedChat(env, msg.chat.id)) {
+        console.warn(`[HERMES] Unauthorized chat_id: ${msg.chat.id}. Allowed: ${rawAllowed}`);
         return new Response("Ignored unauthorized chat_id", { status: 200 });
       }
 
@@ -212,7 +316,13 @@ export default {
       const targetRepo = env.GITHUB_REPO || "alann5245-crypto/ctd-075";
       const ghPat = String(env.GITHUB_PAT || "").trim();
       if (!ghPat) {
-        return new Response("Missing GITHUB_PAT in Worker env", { status: 500 });
+        console.error("[HERMES] Missing GITHUB_PAT in Worker env");
+        await notifyMainBot(
+          env,
+          msg.chat.id,
+          `⚠️ *[Hermes Gateway - Thiếu GITHUB_PAT]*\n\nCloudflare Worker chưa có biến bí mật \`GITHUB_PAT\` để kích hoạt GitHub Actions.\n\nHãy tạo GitHub Personal Access Token (PAT) có quyền \`repo\` hoặc \`Contents: Read and write\` trên repo \`${targetRepo}\`, rồi thêm vào Cloudflare Worker Settings ➔ Variables and Secrets!`
+        );
+        return new Response("Missing GITHUB_PAT in Worker env", { status: 200 });
       }
 
       const ghResponse = await fetch(
@@ -240,19 +350,24 @@ export default {
       );
 
       if (!ghResponse.ok) {
+        const ghErrText = await ghResponse.text();
+        console.error(`[HERMES] GitHub dispatch failed (${ghResponse.status}): ${ghErrText}`);
+        await notifyMainBot(
+          env,
+          msg.chat.id,
+          `⚠️ *[Hermes Gateway - Lỗi GitHub API]*\n\nKhông thể kích hoạt GitHub Actions (\`HTTP ${ghResponse.status}\`):\n\`${ghErrText.slice(0, 200)}\`\n\nVui lòng kiểm tra lại quyền hạn của \`GITHUB_PAT\` trên repo \`${targetRepo}\`.`
+        );
         return new Response("GitHub dispatch failed", { status: 502 });
       }
 
-      // Immediate acknowledgement on the Fixed Main Bot so the phone shows status within ~1s
+      // Immediate acknowledgement on the Fixed Main Bot so the user sees status within ~1s
+      const sourceNote = slotMeta.label !== "MAIN_BOT" ? ` (qua ${slotMeta.label})` : "";
+      const ackMessage = `⚡ Đã nhận lệnh${sourceNote}. Hermes đang khởi động GitHub Actions (khoảng 15–30 giây) và sẽ phản hồi chi tiết tại đây.`;
+
       if (ctx && typeof ctx.waitUntil === "function") {
-        const sourceNote = slotMeta.label !== "MAIN_BOT" ? ` (qua ${slotMeta.label})` : "";
-        ctx.waitUntil(
-          notifyMainBot(
-            env,
-            msg.chat.id,
-            `⚡ Đã nhận lệnh${sourceNote}. Hermes đang khởi động GitHub Actions (khoảng 15–30 giây) và sẽ phản hồi chi tiết tại đây.`
-          )
-        );
+        ctx.waitUntil(notifyMainBot(env, msg.chat.id, ackMessage));
+      } else {
+        await notifyMainBot(env, msg.chat.id, ackMessage);
       }
 
       return Response.json({
@@ -270,7 +385,7 @@ async function notifyMainBot(env, chatId, text) {
   const mainToken = getBotToken(env, "main");
   if (!mainToken) return;
   try {
-    await fetch(`https://api.telegram.org/bot${mainToken}/sendMessage`, {
+    const res = await fetch(`https://api.telegram.org/bot${mainToken}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -280,8 +395,19 @@ async function notifyMainBot(env, chatId, text) {
         disable_web_page_preview: true,
       }),
     });
+    if (!res.ok) {
+      // Retry without Markdown if parse mode error occurred
+      await fetch(`https://api.telegram.org/bot${mainToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text,
+          disable_web_page_preview: true,
+        }),
+      });
+    }
   } catch {
-    // Non-blocking courtesy notification
+    // Non-blocking
   }
 }
-
