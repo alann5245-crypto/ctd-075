@@ -31,7 +31,7 @@ concurrency:
 jobs:
   hermes:
     name: State Synchronization
-    if: github.actor == 'alann5245-crypto'
+    if: github.actor == 'alann5245-crypto' || github.actor == 'alanturing201-code'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
