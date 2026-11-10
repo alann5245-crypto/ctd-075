@@ -1,0 +1,130 @@
+name: Hermes Autonomous Runner
+
+on:
+  schedule:
+    # 07:13, 13:13, 21:13 ICT (Asia/Ho_Chi_Minh, UTC+7) - odd minute to avoid :00 GitHub runner congestion
+    - cron: '13 0,6,14 * * *'
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'Direct instruction or prompt for Hermes Agent (optional)'
+        required: false
+        type: string
+  repository_dispatch:
+    types:
+      - telegram_webhook
+  issue_comment:
+    types:
+      - created
+  commit_comment:
+    types:
+      - created
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: hermes-vault-lock
+  cancel-in-progress: false
+
+jobs:
+  hermes:
+    name: State Synchronization
+    if: github.actor == 'alann5245-crypto'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Runner Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Mount Private Vault
+        id: clone_vault
+        env:
+          VAULT_PAT: ${{ secrets.VAULT_PAT }}
+          VAULT_REPO: ${{ secrets.VAULT_REPO }}
+        run: |
+          set -e
+          echo "Mounting workspace..."
+          if [ -z "${VAULT_PAT}" ]; then
+            exit 1
+          fi
+          TARGET_REPO="${VAULT_REPO:-alann5245-crypto/Source}"
+          git clone --quiet --depth 5 --branch main "https://x-access-token:${VAULT_PAT}@github.com/${TARGET_REPO}.git" /tmp/vault >/dev/null 2>&1
+          mkdir -p /tmp/vault/logs /tmp/vault/memory
+
+      - name: Setup uv Runtime
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "/tmp/vault/uv.lock"
+
+      - name: Execute Autonomous Cycle
+        env:
+          VAULT_PAT: ${{ secrets.VAULT_PAT }}
+          VAULT_REPO: ${{ secrets.VAULT_REPO }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_INPUT_PROMPT: ${{ inputs.prompt }}
+        run: |
+          echo "Syncing state..."
+          uv run --project /tmp/vault /tmp/vault/entrypoint.py > /tmp/vault/logs/latest_session.log 2>&1
+          echo "Task completed."
+
+      - name: Conflict-Free Vault Sync-Out
+        if: always() && steps.clone_vault.outcome == 'success'
+        run: |
+          echo "Persisting state..."
+          {
+            cd /tmp/vault
+            git config user.name "Hermes Agent"
+            git config user.email "hermes-bot@users.noreply.github.com"
+            git add memory/ logs/
+            git diff --staged --quiet || git commit -m "chore(state): sync memory and logs [skip ci]"
+            git pull --rebase --autostash origin main
+            git push origin main
+          } >/dev/null 2>&1
+          echo "State persisted."
+
+      - name: Keep-Alive Monthly Heartbeat
+        if: success()
+        run: |
+          if [ "$(TZ='Asia/Ho_Chi_Minh' date +%d)" = "01" ]; then
+            CURRENT_MONTH="$(TZ='Asia/Ho_Chi_Minh' date +%Y-%m)"
+            if grep -q "^Last active:" README.md; then
+              sed -i "s/^Last active:.*/Last active: ${CURRENT_MONTH}/" README.md
+            else
+              printf "\nLast active: %s\n" "${CURRENT_MONTH}" >> README.md
+            fi
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add README.md
+            if ! git diff --staged --quiet; then
+              {
+                git commit -m "chore(heartbeat): update Last active ${CURRENT_MONTH} [skip ci]"
+                git pull --rebase --autostash origin main
+                git push origin main
+              } >/dev/null 2>&1
+            fi
+          fi
+
+      - name: Emergency Fuse Alert
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -n "${TELEGRAM_BOT_TOKEN}" ] && [ -n "${TELEGRAM_CHAT_ID}" ]; then
+            curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d "chat_id=${TELEGRAM_CHAT_ID}" \
+              --data-urlencode "text=⚠️ [HERMES ALERT] Workflow tại Repo 1 bị lỗi (có thể do hết hạn VAULT_PAT hoặc lỗi hệ thống). Hãy kiểm tra ngay!" \
+              >/dev/null 2>&1 || true
+          fi
