@@ -11,7 +11,12 @@
 const BOT_SLOTS = {
   main: {
     label: "MAIN_BOT",
-    envKeys: ["TELEGRAM_MAIN_BOT_TOKEN", "TELEGRAM_BOT_TOKEN", "MAIN_BOT_TOKEN"],
+    envKeys: [
+      "TELEGRAM_MAIN_BOT_TOKEN",
+      "TELEGRAM_BOT_TOKEN",
+      "MAIN_BOT_TOKEN",
+      "BOT_TOKEN",
+    ],
   },
   bot1: {
     label: "BOT_1",
@@ -38,8 +43,38 @@ function getBotToken(env, slotKey) {
   return "";
 }
 
+function getWebhookSecret(env) {
+  return String(
+    env.WEBHOOK_SECRET ||
+    env.TELEGRAM_WEBHOOK_SECRET ||
+    env.SECRET ||
+    env.KEY ||
+    env.WEBHOOK_KEY ||
+    env.SECRET_KEY ||
+    env.TELEGRAM_SECRET ||
+    ""
+  ).trim();
+}
+
+function getGhPat(env) {
+  return String(
+    env.GITHUB_PAT ||
+    env.GH_PAT ||
+    env.GITHUB_TOKEN ||
+    env.GH_TOKEN ||
+    env.PAT ||
+    ""
+  ).trim();
+}
+
 function getRawAllowedChat(env) {
-  return String(env.ALLOWED_CHAT_ID || env.TELEGRAM_CHAT_ID || "").trim();
+  return String(
+    env.ALLOWED_CHAT_ID ||
+    env.TELEGRAM_CHAT_ID ||
+    env.CHAT_ID ||
+    env.OWNER_CHAT_ID ||
+    ""
+  ).trim();
 }
 
 function isAllowedChat(env, chatId) {
@@ -65,21 +100,20 @@ export default {
         Boolean(getBotToken(env, k))
       );
       const rawAllowed = getRawAllowedChat(env);
-      const hasGhPat = Boolean(String(env.GITHUB_PAT || "").trim());
-      const hasWebhookSecret = Boolean(
-        String(env.WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || "").trim()
-      );
+      const ghPat = getGhPat(env);
+      const webhookSecret = getWebhookSecret(env);
 
       return Response.json({
         ok: true,
         service: "hermes-telegram-gateway",
         target_repo: env.GITHUB_REPO || "alann5245-crypto/ctd-075",
         configured_bots: configuredSlots.map((k) => BOT_SLOTS[k].label),
+        available_env_keys: Object.keys(env).filter((k) => !k.startsWith("__")),
         worker_variables_status: {
           main_bot_token: configuredSlots.includes("main"),
-          webhook_secret: hasWebhookSecret,
+          webhook_secret: Boolean(webhookSecret),
           allowed_chat_id: rawAllowed ? `CONFIGURED (${rawAllowed.length} chars)` : "NOT_SET",
-          github_pat: hasGhPat ? "CONFIGURED" : "NOT_SET",
+          github_pat: Boolean(ghPat) ? "CONFIGURED" : "NOT_SET",
         },
         endpoints: {
           main: "/webhook/main",
@@ -94,9 +128,7 @@ export default {
 
     // 2. Comprehensive Diagnostic Endpoint: GET /status?key=<WEBHOOK_SECRET>
     if (request.method === "GET" && path === "/status") {
-      const expectedKey = String(
-        env.WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || ""
-      ).trim();
+      const expectedKey = getWebhookSecret(env);
       const rawProvided = String(
         url.searchParams.get("key") || url.searchParams.get("secret") || ""
       ).trim();
@@ -126,7 +158,7 @@ export default {
       }
 
       const targetRepo = env.GITHUB_REPO || "alann5245-crypto/ctd-075";
-      const ghPat = String(env.GITHUB_PAT || "").trim();
+      const ghPat = getGhPat(env);
       let githubPatTest = null;
       if (ghPat) {
         try {
@@ -154,6 +186,7 @@ export default {
       return Response.json({
         ok: true,
         target_repo: targetRepo,
+        available_env_keys: Object.keys(env).filter((k) => !k.startsWith("__")),
         variables: {
           has_main_bot_token: Boolean(mainToken),
           has_webhook_secret: Boolean(expectedKey),
@@ -170,9 +203,7 @@ export default {
       request.method === "GET" &&
       (path === "/setup-webhooks" || path === "/delete-webhooks")
     ) {
-      const expectedKey = String(
-        env.WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || ""
-      ).trim();
+      const expectedKey = getWebhookSecret(env);
       const rawProvided = String(
         url.searchParams.get("key") || url.searchParams.get("secret") || ""
       ).trim();
@@ -252,9 +283,7 @@ export default {
 
     // 4. Incoming Telegram Webhook handler: POST /webhook/:slot
     if (request.method === "POST" && path.startsWith("/webhook")) {
-      const expectedSecret = String(
-        env.WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || ""
-      ).trim();
+      const expectedSecret = getWebhookSecret(env);
       if (expectedSecret) {
         const headerSecret = request.headers.get(
           "X-Telegram-Bot-Api-Secret-Token"
@@ -292,7 +321,7 @@ export default {
       }
 
       const rawAllowed = getRawAllowedChat(env);
-      // Auto-Help: If ALLOWED_CHAT_ID is not configured yet on Worker, immediately tell the user their Chat ID!
+      // Auto-Help: If ALLOWED_CHAT_ID is not configured yet on Worker, immediately notify user with their Chat ID!
       if (!rawAllowed) {
         console.warn(`[HERMES] ALLOWED_CHAT_ID not configured on Worker. Sender chat_id: ${msg.chat.id}`);
         await notifyMainBot(
@@ -314,7 +343,7 @@ export default {
       }
 
       const targetRepo = env.GITHUB_REPO || "alann5245-crypto/ctd-075";
-      const ghPat = String(env.GITHUB_PAT || "").trim();
+      const ghPat = getGhPat(env);
       if (!ghPat) {
         console.error("[HERMES] Missing GITHUB_PAT in Worker env");
         await notifyMainBot(
