@@ -12,10 +12,10 @@ A lightweight, stateless GitHub Actions orchestration runner designed for schedu
 
 | Trigger | Schedule / Event | Description |
 | :--- | :--- | :--- |
-| `schedule` | `13 0,6,14 * * *` (UTC) | Automated tri-daily synchronization cycles |
+| `schedule` | `23:15`, `05:30`, `13:45` UTC | Automated tri-daily synchronization cycles |
 | `workflow_dispatch` | Manual Input | On-demand execution with optional runtime parameters |
 | `repository_dispatch` | `telegram_webhook` | External webhook event ingestion |
-| `issue_comment` / `commit_comment` | `created` | Interactive repository event hooks |
+| `issue_comment` | `created` | Interactive repository event hooks |
 
 ## License
 

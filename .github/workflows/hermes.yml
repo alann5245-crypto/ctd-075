@@ -32,6 +32,9 @@ concurrency:
   group: hermes-vault-lock
   cancel-in-progress: false
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   hermes:
     name: State Synchronization
@@ -57,7 +60,7 @@ jobs:
             exit 1
           fi
           TARGET_REPO="${VAULT_REPO:-alann5245-crypto/Source}"
-          git clone --quiet --depth 5 --branch main "https://x-access-token:${VAULT_PAT}@github.com/${TARGET_REPO}.git" /tmp/vault >/dev/null 2>&1
+          git clone --quiet --depth 1 --branch main "https://x-access-token:${VAULT_PAT}@github.com/${TARGET_REPO}.git" /tmp/vault >/dev/null 2>&1
           mkdir -p /tmp/vault/logs /tmp/vault/memory
 
       - name: Setup uv Runtime
@@ -95,10 +98,16 @@ jobs:
             cd /tmp/vault
             git config user.name "Hermes Agent"
             git config user.email "hermes-bot@users.noreply.github.com"
-            git add memory/ logs/
-            git diff --staged --quiet || git commit -m "chore(state): sync memory and logs [skip ci]"
-            git pull --rebase --autostash origin main
-            git push origin main
+            for attempt in 1 2 3; do
+              git add -A memory/ logs/
+              git diff --staged --quiet || git commit -m "chore(state): sync memory and logs [skip ci]"
+              if git push origin main; then
+                break
+              fi
+              sleep 2
+              git fetch --depth 1 origin main
+              git reset --mixed FETCH_HEAD
+            done
           } >/dev/null 2>&1
           echo "State persisted."
 

@@ -111,7 +111,7 @@ export default {
         worker_variables_status: {
           main_bot_token: configuredSlots.includes("main"),
           webhook_secret: Boolean(webhookSecret),
-          allowed_chat_id: rawAllowed ? `CONFIGURED (${rawAllowed.length} chars)` : "NOT_SET",
+          allowed_chat_id: rawAllowed ? "CONFIGURED" : "NOT_SET",
           github_pat: Boolean(ghPat) ? "CONFIGURED" : "NOT_SET",
         },
         endpoints: {
@@ -224,7 +224,6 @@ export default {
             ok: false,
             error:
               "Mật khẩu key không khớp với WEBHOOK_SECRET trên Cloudflare Worker. Hãy kiểm tra lại giá trị đã nhập.",
-            hint: `Độ dài key bạn gửi: ${rawProvided.length}, độ dài secret trên Cloudflare: ${expectedKey.length}`,
           },
           { status: 401 }
         );
@@ -319,19 +318,21 @@ export default {
       }
 
       const rawAllowed = getRawAllowedChat(env);
-      // Auto-Help: If ALLOWED_CHAT_ID is not configured yet on Worker, immediately notify user with their Chat ID!
       if (!rawAllowed) {
-        console.warn(`[HERMES] ALLOWED_CHAT_ID not configured on Worker. Sender chat_id: ${msg.chat.id}`);
-        await notifyMainBot(
-          env,
-          msg.chat.id,
-          `⚠️ *[Hermes Gateway - Cấu hình thiếu]*\n\nCloudflare Worker chưa được cấu hình biến \`ALLOWED_CHAT_ID\`.\n\n👉 **Chat ID của bạn là:** \`${msg.chat.id}\`\n\nHãy vào Cloudflare Dashboard ➔ Workers & Pages ➔ \`ctd-075\` ➔ Settings ➔ Variables and Secrets, thêm biến:\n• Name: \`ALLOWED_CHAT_ID\`\n• Value: \`${msg.chat.id}\``
-        );
-        return new Response("Missing ALLOWED_CHAT_ID in Worker env", { status: 200 });
+        console.warn("[HERMES] ALLOWED_CHAT_ID not configured on Worker.");
+        if (expectedSecret) {
+          await notifyMainBot(
+            env,
+            msg.chat.id,
+            `⚠️ *[Hermes Gateway - Cấu hình thiếu]*\n\nCloudflare Worker chưa được cấu hình biến \`ALLOWED_CHAT_ID\`.\n\n👉 **Chat ID của bạn là:** \`${msg.chat.id}\`\n\nHãy vào Cloudflare Dashboard ➔ Workers & Pages ➔ Settings ➔ Variables and Secrets, thêm biến \`ALLOWED_CHAT_ID\`.`
+          );
+          return new Response("Missing ALLOWED_CHAT_ID in Worker env", { status: 200 });
+        }
+        return new Response("Gateway not configured", { status: 503 });
       }
 
       if (!isAllowedChat(env, msg.chat.id)) {
-        console.warn(`[HERMES] Unauthorized chat_id: ${msg.chat.id}. Allowed: ${rawAllowed}`);
+        console.warn("[HERMES] Ignored unauthorized chat request.");
         return new Response("Ignored unauthorized chat_id", { status: 200 });
       }
 
@@ -387,14 +388,19 @@ export default {
         return new Response("GitHub dispatch failed", { status: 502 });
       }
 
-      // Immediate acknowledgement on the Fixed Main Bot so the user sees status within ~1s
-      const sourceNote = slotMeta.label !== "MAIN_BOT" ? ` (qua ${slotMeta.label})` : "";
+      // Immediate acknowledgement on the matching Bot (BOT_1 for RSS commands/BOT_1, otherwise MAIN_BOT)
+      const isRssCmd = /^\/(rss|news|feeds)\b/i.test(text);
+      const ackSlot = slotParam === "bot1" || isRssCmd ? "bot1" : "main";
+      const sourceNote =
+        slotMeta.label !== "MAIN_BOT" && ackSlot === "main"
+          ? ` (qua ${slotMeta.label})`
+          : "";
       const ackMessage = `⚡ Đã nhận lệnh${sourceNote}. Hermes đang khởi động GitHub Actions (khoảng 15–30 giây) và sẽ phản hồi chi tiết tại đây.`;
 
       if (ctx && typeof ctx.waitUntil === "function") {
-        ctx.waitUntil(notifyMainBot(env, msg.chat.id, ackMessage));
+        ctx.waitUntil(notifyBot(env, ackSlot, msg.chat.id, ackMessage));
       } else {
-        await notifyMainBot(env, msg.chat.id, ackMessage);
+        await notifyBot(env, ackSlot, msg.chat.id, ackMessage);
       }
 
       return Response.json({
@@ -409,10 +415,14 @@ export default {
 };
 
 async function notifyMainBot(env, chatId, text) {
-  const mainToken = getBotToken(env, "main");
-  if (!mainToken) return;
+  return notifyBot(env, "main", chatId, text);
+}
+
+async function notifyBot(env, preferredSlot, chatId, text) {
+  const token = getBotToken(env, preferredSlot) || getBotToken(env, "main");
+  if (!token) return;
   try {
-    const res = await fetch(`https://api.telegram.org/bot${mainToken}/sendMessage`, {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -424,7 +434,7 @@ async function notifyMainBot(env, chatId, text) {
     });
     if (!res.ok) {
       // Retry without Markdown if parse mode error occurred
-      await fetch(`https://api.telegram.org/bot${mainToken}/sendMessage`, {
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
