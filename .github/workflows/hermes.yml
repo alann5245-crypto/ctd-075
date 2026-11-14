@@ -44,7 +44,7 @@ jobs:
 
     steps:
       - name: Checkout Runner Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -64,7 +64,7 @@ jobs:
           mkdir -p /tmp/vault/logs /tmp/vault/memory
 
       - name: Setup uv Runtime
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: "/tmp/vault/uv.lock"

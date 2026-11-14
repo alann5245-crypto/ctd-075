@@ -418,31 +418,39 @@ async function notifyMainBot(env, chatId, text) {
   return notifyBot(env, "main", chatId, text);
 }
 
+async function _sendTelegramText(token, chatId, text) {
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+    }),
+  });
+  if (res.ok) return true;
+  // Retry without Markdown if parse mode error occurred
+  const fallbackRes = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      disable_web_page_preview: true,
+    }),
+  });
+  return fallbackRes.ok;
+}
+
 async function notifyBot(env, preferredSlot, chatId, text) {
-  const token = getBotToken(env, preferredSlot) || getBotToken(env, "main");
-  if (!token) return;
+  const mainToken = getBotToken(env, "main");
+  const primaryToken = getBotToken(env, preferredSlot) || mainToken;
+  if (!primaryToken) return;
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text,
-        parse_mode: "Markdown",
-        disable_web_page_preview: true,
-      }),
-    });
-    if (!res.ok) {
-      // Retry without Markdown if parse mode error occurred
-      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text,
-          disable_web_page_preview: true,
-        }),
-      });
+    const ok = await _sendTelegramText(primaryToken, chatId, text);
+    if (!ok && mainToken && primaryToken !== mainToken) {
+      await _sendTelegramText(mainToken, chatId, text);
     }
   } catch {
     // Non-blocking
