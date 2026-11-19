@@ -182,11 +182,16 @@ export default {
         githubPatTest = { ok: false, error: "GITHUB_PAT chưa được đặt trên Cloudflare Worker" };
       }
 
+      const configuredBots = Object.entries(BOT_SLOTS)
+        .filter(([slotKey]) => Boolean(getBotToken(env, slotKey)))
+        .map(([, meta]) => meta.label);
+
       return Response.json({
         ok: true,
         target_repo: targetRepo,
         variables: {
           has_main_bot_token: Boolean(mainToken),
+          configured_bots: configuredBots,
           has_webhook_secret: Boolean(expectedKey),
           allowed_chat_configured: Boolean(getRawAllowedChat(env)),
           has_github_pat: Boolean(ghPat),
@@ -250,7 +255,12 @@ export default {
           ? {
               url: `${origin}/webhook/${slotKey}`,
               secret_token: tgSecretToken,
-              allowed_updates: ["message", "edited_message"],
+              allowed_updates: [
+                "message",
+                "edited_message",
+                "channel_post",
+                "edited_channel_post",
+              ],
               drop_pending_updates: false,
             }
           : { drop_pending_updates: false };
@@ -385,7 +395,11 @@ export default {
           msg.chat.id,
           `⚠️ *[Hermes Gateway - Lỗi GitHub API]*\n\nKhông thể kích hoạt GitHub Actions (\`HTTP ${ghResponse.status}\`):\n\`${ghErrText.slice(0, 200)}\`\n\nVui lòng kiểm tra lại quyền hạn của \`GITHUB_PAT\` trên repo \`${targetRepo}\`.`
         );
-        return new Response("GitHub dispatch failed", { status: 502 });
+        return Response.json({
+          ok: false,
+          error: "GitHub dispatch failed",
+          status: ghResponse.status,
+        });
       }
 
       // Immediate acknowledgement on the matching Bot (BOT_1 for RSS commands/BOT_1, otherwise MAIN_BOT)
