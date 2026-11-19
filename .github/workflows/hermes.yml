@@ -74,6 +74,12 @@ jobs:
           VAULT_PAT: ${{ secrets.VAULT_PAT }}
           VAULT_REPO: ${{ secrets.VAULT_REPO }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_KEY2: ${{ secrets.LLM_API_KEY2 }}
+          LLM_API_KEY_2: ${{ secrets.LLM_API_KEY_2 }}
+          LLM_API_KEY_GEMINIFREE_1: ${{ secrets.LLM_API_KEY_GEMINIFREE_1 }}
+          LLM_API_KEY_GEMINIFREE_2: ${{ secrets.LLM_API_KEY_GEMINIFREE_2 }}
+          LLM_API_KEY_GEMINIFREE_3: ${{ secrets.LLM_API_KEY_GEMINIFREE_3 }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           TELEGRAM_MAIN_BOT_TOKEN: ${{ secrets.TELEGRAM_MAIN_BOT_TOKEN }}
