@@ -61,7 +61,20 @@ jobs:
           fi
           TARGET_REPO="${VAULT_REPO:-alann5245-crypto/Source}"
           git clone --quiet --depth 1 --branch main "https://x-access-token:${VAULT_PAT}@github.com/${TARGET_REPO}.git" /tmp/vault >/dev/null 2>&1
-          mkdir -p /tmp/vault/logs /tmp/vault/memory
+          mkdir -p /tmp/vault/logs /tmp/vault/memory /tmp/gbrain_home
+
+      - name: Compute Knowledge Base Fingerprint
+        id: kb_rev
+        run: |
+          REV="$(git -C /tmp/vault rev-parse HEAD:knowledge_base 2>/dev/null || echo none)"
+          echo "rev=${REV}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Knowledge Base FTS Index
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: /tmp/gbrain_home/kb_fts.sqlite
+          key: ${{ runner.os }}-kb-fts-v1-${{ steps.kb_rev.outputs.rev }}
 
       - name: Setup uv Runtime
         uses: astral-sh/setup-uv@v10.3.3
