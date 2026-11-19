@@ -14,6 +14,10 @@ on:
         description: 'Direct instruction or prompt for Hermes Agent (optional)'
         required: false
         type: string
+      bot:
+        description: 'Target bot slot for reply (optional: MAIN_BOT, BOT_1, BOT_2, BOT_3)'
+        required: false
+        type: string
   repository_dispatch:
     types:
       - telegram_webhook
@@ -140,6 +144,7 @@ jobs:
           VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
           GBRAIN_EMBEDDING_MODEL: ${{ vars.GBRAIN_EMBEDDING_MODEL }}
           WORKFLOW_INPUT_PROMPT: ${{ inputs.prompt }}
+          WORKFLOW_INPUT_BOT: ${{ inputs.bot }}
           PYTHONUNBUFFERED: "1"
         run: |
           echo "Syncing state..."
