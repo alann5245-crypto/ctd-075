@@ -69,6 +69,36 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "/tmp/vault/uv.lock"
 
+      - name: Setup Bun Runtime
+        continue-on-error: true
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
+      - name: Cache Bun Global Packages
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun144-gbrain-stable
+
+      - name: Setup GBrain CLI
+        continue-on-error: true
+        working-directory: /tmp
+        run: |
+          export PATH="$HOME/.bun/bin:$PATH"
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          if ! command -v gbrain >/dev/null 2>&1; then
+            if ! bun install -g github:garrytan/gbrain#stable --trust; then
+              rm -rf /tmp/gbrain-src
+              git clone --depth 1 --branch stable https://github.com/garrytan/gbrain.git /tmp/gbrain-src
+              cd /tmp/gbrain-src
+              bun install --ignore-scripts
+              bun link
+            fi
+          fi
+          gbrain --version || true
+
       - name: Execute Autonomous Cycle
         env:
           VAULT_PAT: ${{ secrets.VAULT_PAT }}
@@ -89,6 +119,13 @@ jobs:
           TELEGRAM_BOT_TOKEN_3: ${{ secrets.TELEGRAM_BOT_TOKEN_3 }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GBRAIN_HOME: "/tmp/gbrain_home"
+          GBRAIN_SKIP_STARTUP_HOOKS: "1"
+          GBRAIN_SEARCH_MODE: "conservative"
+          GBRAIN_DATABASE_URL: ${{ secrets.GBRAIN_DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+          GBRAIN_EMBEDDING_MODEL: ${{ vars.GBRAIN_EMBEDDING_MODEL }}
           WORKFLOW_INPUT_PROMPT: ${{ inputs.prompt }}
           PYTHONUNBUFFERED: "1"
         run: |
